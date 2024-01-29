@@ -1,0 +1,246 @@
+syntax = "proto3";
+package dataloader;
+
+service DataLoader {
+    rpc GetTickerDetails(BasicTicker) returns (Ticker);
+    rpc GetTickers(TickerFilter) returns (stream Ticker);
+    rpc GetSecurityData(TimeSeriesReq) returns (stream TimeSeriesData);
+    rpc GetMovement(MovementReq) returns (Movement);
+    rpc GetMovements(MovementsReq) returns (Movements);
+    rpc GetCorrelations(CorrelReq) returns (stream Correl);
+    rpc GetCorrelatingTickers(CorrelTickersReq) returns (stream Correl);
+    rpc GetMutualCorrelations(CorrelReq) returns (MutualCorrels);
+    rpc GetLatestSecurityDataDate(DateReq) returns (Date);
+
+    // portfolio procedures:
+    rpc GetPortfolios(PortfolioReq) returns (PortfolioMetas);
+    rpc GetPortfolio(ID) returns (PortfolioMeta);
+    rpc GetPortfolioSecurities(ID) returns (PortfolioSecurities);
+    rpc GetPortfolioProfits(SecurityProfitReq) returns (SecurityProfits);
+
+    rpc CreatePortfolio(CreatePortfolioReq) returns (PortfolioMeta);
+    rpc DeletePortfolio(ID) returns (SuccessResp);
+    rpc BuySecurity(PortfolioSecurity) returns (SuccessResp);
+    rpc SellSecurity(PortfolioSecurity) returns (SuccessResp);
+    rpc DeletePortfolioSecurity(PortfolioSecurity) returns (SuccessResp);
+}
+
+message DateReq {
+    string ticker = 1;
+    TickerType security_type = 2;
+    bool intraday = 3;
+}
+message Date {
+    string date = 1;
+}
+
+message ID {
+    string id = 1;
+}
+
+message CreatePortfolioReq {
+    string name = 1;
+    string description = 2;
+}
+message PortfolioMetas {
+    repeated PortfolioMeta portfolios = 1;
+}
+message PortfolioMeta {
+    string id = 1;
+    string name = 2;
+    string description = 3;
+}
+message PortfolioReq {
+    string filter = 1;
+}
+
+message PortfolioSecurities {
+    repeated PortfolioSecurity securities = 1;
+
+}
+message PortfolioSecurity {
+    string portfolio_id = 1;
+    int32 security_type = 2;
+    string ticker = 3;
+    double volume = 4;
+    string purchase_date = 5;
+    string sell_date = 6;
+}
+message SecurityProfitReq {
+    message Security {
+        string ticker = 1;
+        TickerType security_type = 2;
+        double volume = 3;
+        string purchase_date = 4;
+        optional string sell_date = 5; // optional if already sold
+    }
+    repeated Security securities = 1;
+    string until = 2;
+    Period partition = 3;
+}
+message SecurityProfits {
+    repeated SecurityProfit profits = 1;
+}
+message SecurityProfit {
+    string ticker = 1;
+    TickerType security_type = 2;
+    double volume = 3;
+    string purchase_date = 4;
+    string until = 5;
+    double purchase_price = 6;
+    double until_price = 7;
+    double profit_per_share = 8;
+    double total_profit = 9;
+}
+
+message CorrelReq {
+    repeated BasicTicker tickers = 1;
+    string until = 2;
+    Period period = 3;
+}
+message CorrelTickersReq {
+    string until = 1;
+    Period period = 2;
+    uint32 limit = 3;
+}
+message Correl {
+    BasicTicker ticker0 = 1;
+    BasicTicker ticker1 = 2;
+    double correl = 3;
+    string date = 4;
+    Period period = 5;
+    bool correl_exists = 6; // if false, then there exists no data for either one of ticker0 or ticher1
+    double volume0 = 7;
+    double volume1 = 8;
+}
+message DetailedCorrel {
+    Ticker ticker0 = 1;
+    Ticker ticker1 = 2;
+    double correl = 3;
+    string date = 4;
+    Period period = 5;
+}
+
+message MutualCorrel {
+    Ticker ticker = 1;
+    repeated DetailedCorrel correlations = 2;
+    double volatility = 3;
+    double stddev = 4;
+    double performance = 5;
+    double volume = 6;
+}
+message MutualCorrels {
+    repeated MutualCorrel correls = 1;
+}
+
+
+message VariancesReq {
+    TickerType ticker_type = 1;
+    int32 period = 2;
+}
+message Variances {
+    message Variance {
+        message Value {
+            double variance = 1;
+            double stddev = 2;
+        }
+        string ticker = 1;
+        map<string, Value> values = 2;
+    }
+    repeated Variance variances = 1;
+    TickerType ticker_type = 2;
+    string date = 4;
+    int32 period = 5;
+}
+
+enum MovementType {
+    WINNER = 0;
+    LOSER = 1;
+    VOLUME = 2;
+    VOLATILITY = 3;
+}
+
+enum Period {
+    YEAR = 0;
+    MONTH = 1;
+    WEEK = 2;
+    DAY = 3;
+    HOUR = 4;
+    MINUTE = 5;
+}
+message MovementsReq {
+    TickerType security_type = 1;
+    string until = 2;
+    Period period = 3;
+    MovementType sort_by = 4;
+    uint32 limit = 5;
+    uint64 min_volume = 6;
+}
+
+message MovementReq {
+    string ticker = 1;
+    TickerType security_type = 2;
+    string until = 3;
+    Period period = 4;
+}
+message Movement {
+    string ticker = 1;
+    string name = 2;
+    TickerType security_type = 3;
+    string date = 4;
+    Period period = 5;
+    double performance = 6;
+    double average = 7;
+    double volume = 8;
+    double variance = 9;
+    double stddev = 10;
+    bool movement_exists = 11;
+}
+message Movements {
+    repeated Movement movements = 1;
+}
+
+message EmptyReq {}
+message SuccessResp{}
+
+enum Status {
+    ACTIVE = 0;
+    DEACTIVATED = 1;
+}
+
+enum TickerType {
+    STOCK = 0;
+    ETF = 1;
+    COMMODITY = 2;
+    CURRENCY = 3;
+    CRYPTO = 4;
+}
+message TickerFilter {
+    TickerType ticker_type = 1;
+    string filter = 2;
+    uint32 limit = 3;
+    uint32 traded_within_past_n_days = 4;
+}
+
+message Ticker {
+    string name = 1;
+    string ticker = 2;
+    int32 security_type = 3;
+    map<string, string> custom_fields = 4;
+}
+message BasicTicker {
+    string ticker = 1;
+    int32 security_type = 2;
+}
+
+message TimeSeriesReq {
+    BasicTicker ticker = 1;
+    string from_date = 2;
+    string until_date = 3;
+    bool intraday = 4;
+}
+
+message TimeSeriesData {
+    string date = 1;
+    map<string, double> values = 2;
+}
