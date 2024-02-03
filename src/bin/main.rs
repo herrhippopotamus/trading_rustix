@@ -44,16 +44,32 @@ async fn echo(req_body: String) -> impl Responder {
 }
 
 #[post("/tickers")]
-async fn tickers(data: Data<Trading>, req: web::Json<trading::TickerFilter>) -> HttpResponse {
+async fn tickers(
+    data: Data<Trading>,
+    req: web::Json<trading::TickerFilter>,
+) -> Result<HttpResponse> {
     let body = data
-        .get_tickers(req.0)
+        .tickers(req.0)
         .await
-        .map_err(|err| RustixErr::new(err, 500))
-        .unwrap();
+        .map_err(|err| RustixErr::new(err, 500))?;
 
-    HttpResponse::Ok()
+    Ok(HttpResponse::Ok()
         .content_type("application/json")
-        .streaming(body)
+        .streaming(body))
+}
+#[post("/securityData")]
+async fn security_data(
+    data: Data<Trading>,
+    req: web::Json<trading::TimeSeriesReq>,
+) -> Result<HttpResponse> {
+    let body = data
+        .security_data(req.0)
+        .await
+        .map_err(|err| RustixErr::new(err, 500))?;
+
+    Ok(HttpResponse::Ok()
+        .content_type("application/json")
+        .streaming(body))
 }
 
 #[post("/portfolio/create")]
@@ -129,6 +145,32 @@ async fn portfolio_securities(
     Ok(web::Json(resp))
 }
 
+#[post("/movements")]
+async fn movements(
+    data: Data<Trading>,
+    req: web::Json<trading::MovementsReq>,
+) -> Result<impl Responder> {
+    let resp = data
+        .movements(req.0)
+        .await
+        .map_err(|err| RustixErr::new(err, 500))?;
+    Ok(web::Json(resp))
+}
+#[post("/correlatingTickers")]
+async fn correlating_tickers(
+    data: Data<Trading>,
+    req: web::Json<trading::CorrelatingTickersReq>,
+) -> Result<HttpResponse> {
+    let body = data
+        .correlating_tickers(req.0)
+        .await
+        .map_err(|err| RustixErr::new(err, 500))?;
+
+    Ok(HttpResponse::Ok()
+        .content_type("application/json")
+        .streaming(body))
+}
+
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     env_logger::init_from_env(Env::default().default_filter_or("info"));
@@ -147,6 +189,9 @@ async fn main() -> std::io::Result<()> {
             .service(sell_portfolio)
             .service(portfolio_profits)
             .service(portfolio_securities)
+            .service(security_data)
+            .service(movements)
+            .service(correlating_tickers)
     })
     .bind(("127.0.0.1", 8080))?
     .run()
@@ -159,6 +204,7 @@ mod tests {
     use reqwest;
     use rustix::trading::{self};
     use serde;
+    use std::time::Instant;
     use tokio;
 
     fn url(endpoint: &str) -> String {
@@ -205,16 +251,37 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn get_tickers() -> Result<()> {
+    async fn tickers() -> Result<()> {
         let req_body = trading::TickerFilter {
             ttype: 0,
             filter: Some("aapl".to_string()),
             limit: Some(10),
             traded_within_past_n_days: None,
         };
-        let tickers: Vec<trading::Ticker> = post_json("/tickers", req_body).await?;
-        println!("streamed {} tickers", tickers.len());
-        assert!(tickers.len() > 0);
+        let ts: Vec<trading::Ticker> = post_json("/tickers", req_body).await?;
+        println!("streamed {} tickers", ts.len());
+        assert!(ts.len() > 0);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn security_data() -> Result<()> {
+        let start = Instant::now();
+        let req_body = trading::TimeSeriesReq {
+            ticker: trading::BasicTicker {
+                ticker: "AAPL".to_string(),
+                security_type: 0,
+            },
+            from: "2024-01-01".to_string(),
+            until: "2024-01-31".to_string(),
+        };
+        let ts: Vec<trading::TimeSeriesData> = post_json("/securityData", req_body).await?;
+        println!(
+            "streamed {} security data in {:?}",
+            ts.len(),
+            start.elapsed()
+        );
+        assert!(ts.len() > 100);
         Ok(())
     }
 }

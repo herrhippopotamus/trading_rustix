@@ -8,7 +8,7 @@ use std::clone::Clone;
 use std::collections::HashMap;
 use std::error::Error;
 use std::fmt;
-use tokio::sync::mpsc::{self, Receiver};
+use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_stream::StreamExt;
 use tonic::transport::Channel;
@@ -69,6 +69,44 @@ impl From<TickerFilter> for db_proto::TickerFilter {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
+pub struct MovementsReq {
+    pub security_type: u32,
+    pub sort_by: u32,
+    pub until: String,
+    pub period: u32,
+    pub limit: u32,
+    pub min_volume: u64,
+}
+impl From<MovementsReq> for db_proto::MovementsReq {
+    fn from(m: MovementsReq) -> Self {
+        Self {
+            security_type: m.security_type as i32,
+            sort_by: m.sort_by as i32,
+            until: m.until,
+            period: m.period as i32,
+            limit: m.limit,
+            min_volume: m.min_volume,
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct CorrelatingTickersReq {
+    pub until: String,
+    pub period: u32,
+    pub limit: u32,
+}
+impl From<CorrelatingTickersReq> for db_proto::CorrelTickersReq {
+    fn from(c: CorrelatingTickersReq) -> Self {
+        Self {
+            until: c.until,
+            period: c.period as i32,
+            limit: c.limit,
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug)]
 pub struct Ticker {
     ticker: String,
     name: Option<String>,
@@ -78,8 +116,8 @@ pub struct Ticker {
 }
 #[derive(Serialize, Deserialize, Debug)]
 pub struct BasicTicker {
-    ticker: String,
-    security_type: i32,
+    pub ticker: String,
+    pub security_type: i32,
 }
 
 impl From<db_proto::Ticker> for Ticker {
@@ -122,17 +160,33 @@ impl From<db_proto::TimeSeriesData> for TimeSeriesData {
         }
     }
 }
+#[derive(Serialize, Deserialize, Debug)]
+pub struct TimeSeriesReq {
+    pub ticker: BasicTicker,
+    pub from: String,
+    pub until: String,
+}
+impl From<TimeSeriesReq> for db_proto::TimeSeriesReq {
+    fn from(t: TimeSeriesReq) -> Self {
+        Self {
+            ticker: Some(t.ticker.into()),
+            from_date: t.from,
+            until_date: t.until,
+            intraday: true,
+        }
+    }
+}
 
 #[derive(Serialize)]
 pub struct Movement {
-    ticker: Ticker,
-    performance: f64,
-    average: f64,
-    volume: f64,
-    variance: f64,
-    stddev: f64,
-    date: String,
-    period: i32,
+    pub ticker: Ticker,
+    pub performance: f64,
+    pub average: f64,
+    pub volume: f64,
+    pub variance: f64,
+    pub stddev: f64,
+    pub date: String,
+    pub period: i32,
 }
 impl From<db_proto::Movement> for Movement {
     fn from(m: db_proto::Movement) -> Self {
@@ -432,7 +486,7 @@ impl Trading {
         .await?)
     }
 
-    pub async fn get_tickers(&self, filter: TickerFilter) -> Result<ActixStream> {
+    pub async fn tickers(&self, filter: TickerFilter) -> Result<ActixStream> {
         let stream = self
             .client()
             .await?
@@ -446,28 +500,12 @@ impl Trading {
             Ok(js)
         };
         Ok(gprc_to_stream(stream, to_json).await)
-        // self.get_trading_data(stream).await
     }
-    pub async fn get_movements(
-        &self,
-        security_type: u32,
-        sort_by: u32,
-        until: String,
-        period: u32,
-        limit: u32,
-        min_volume: u64,
-    ) -> Result<Movements> {
+    pub async fn movements(&self, req: MovementsReq) -> Result<Movements> {
         Ok(self
             .client()
             .await?
-            .get_movements(tonic::Request::new(db_proto::MovementsReq {
-                security_type: security_type as i32,
-                until,
-                period: period as i32,
-                sort_by: sort_by as i32,
-                limit,
-                min_volume,
-            }))
+            .get_movements(tonic::Request::new(req.into()))
             .await?
             .into_inner()
             .movements
@@ -475,36 +513,23 @@ impl Trading {
             .map(|m| m.into())
             .collect())
     }
-    pub async fn get_correlating_tickers(
-        &self,
-        until: String,
-        period: u32,
-        limit: u32,
-    ) -> Result<Receiver<CorrelatingTickers>> {
-        println!(
-            "in get_correlating_tickers: {}, {}, {}",
-            until, period, limit
-        );
-        let (tx, rx) = mpsc::channel(if limit > 0 { limit as usize } else { 100 });
-        let mut stream = self
+    pub async fn correlating_tickers(&self, req: CorrelatingTickersReq) -> Result<ActixStream> {
+        let stream = self
             .client()
             .await?
-            .get_correlating_tickers(tonic::Request::new(db_proto::CorrelTickersReq {
-                until,
-                period: period as i32,
-                limit,
-            }))
+            .get_correlating_tickers(tonic::Request::new(req.into()))
             .await?
             .into_inner();
-        tokio::spawn(async move {
-            while let Some(ticker) = stream.next().await {
-                tx.send(ticker?.into()).await?;
-            }
-            Result::<()>::Ok(())
-        });
-        Ok(rx)
+
+        let to_json = |t: db_proto::Correl| -> Result<String> {
+            let t: CorrelatingTickers = t.into();
+            let js = serde_json::to_string(&t).unwrap();
+            Ok(js)
+        };
+
+        Ok(gprc_to_stream(stream, to_json).await)
     }
-    pub async fn get_mutual_correlations(
+    pub async fn mutual_correlations(
         &self,
         tickers: &Vec<BasicTicker>,
         until: Option<&str>,
@@ -529,33 +554,20 @@ impl Trading {
             .collect::<Result<Vec<_>, StreamError>>()?;
         Ok(mutual_correls)
     }
-    pub async fn get_security_data(
-        &self,
-        ticker: db_proto::BasicTicker,
-        from: &str,
-        until: &str,
-        intraday: bool,
-    ) -> Result<Receiver<TimeSeriesData>> {
-        let (tx, rx) = mpsc::channel(100);
-        let mut stream = self
+    pub async fn security_data(&self, req: TimeSeriesReq) -> Result<ActixStream> {
+        let stream = self
             .client()
             .await?
-            .get_security_data(tonic::Request::new(db_proto::TimeSeriesReq {
-                ticker: Some(ticker),
-                from_date: from.to_string(),
-                until_date: until.to_string(),
-                intraday: intraday,
-            }))
+            .get_security_data(tonic::Request::new(req.into()))
             .await?
             .into_inner();
 
-        tokio::spawn(async move {
-            while let Some(stock) = stream.next().await {
-                tx.send(stock?.into()).await?;
-            }
-            Result::<()>::Ok(())
-        });
-        Ok(rx)
+        let to_json = |t: db_proto::TimeSeriesData| -> Result<String> {
+            let t: TimeSeriesData = t.into();
+            let js = serde_json::to_string(&t).unwrap();
+            Ok(js)
+        };
+        Ok(gprc_to_stream(stream, to_json).await)
     }
     pub async fn portfolio(&self, portfolio_id: String) -> Result<Portfolio> {
         let mut client = self.client().await?;
