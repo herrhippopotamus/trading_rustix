@@ -1,17 +1,15 @@
 use crate::envs::Envs;
 use anyhow::Result;
+use bytes::Bytes;
 use dataloader::data_loader_client::DataLoaderClient;
-use dataloader::{
-    self as db_proto, BasicTicker, Correl, CorrelReq, CorrelTickersReq, DetailedCorrel, Movement,
-    MovementsReq, MutualCorrel, Ticker, TickerFilter, TimeSeriesData, TimeSeriesReq,
-};
-// use futures_util::TryFutureExt;
+use dataloader::{self as db_proto};
 use serde::{Deserialize, Serialize};
 use std::clone::Clone;
 use std::collections::HashMap;
 use std::error::Error;
 use std::fmt;
 use tokio::sync::mpsc::{self, Receiver};
+use tokio_stream::wrappers::ReceiverStream;
 use tokio_stream::StreamExt;
 use tonic::transport::Channel;
 use tonic::Streaming;
@@ -48,7 +46,30 @@ pub mod dataloader {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-pub struct JSONTicker {
+pub struct TickerFilter {
+    #[serde(rename = "security_type")]
+    pub ttype: i32,
+    #[serde(default)]
+    pub filter: Option<String>,
+    #[serde(default)]
+    pub limit: Option<u32>,
+    #[serde(default)]
+    pub traded_within_past_n_days: Option<u32>,
+}
+
+impl From<TickerFilter> for db_proto::TickerFilter {
+    fn from(t: TickerFilter) -> Self {
+        Self {
+            ticker_type: t.ttype,
+            filter: t.filter.unwrap_or("".to_string()),
+            limit: t.limit.unwrap_or(100),
+            traded_within_past_n_days: t.traded_within_past_n_days.unwrap_or(10),
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct Ticker {
     ticker: String,
     name: Option<String>,
     security_type: i32,
@@ -56,13 +77,13 @@ pub struct JSONTicker {
     custom_fields: Option<HashMap<String, String>>,
 }
 #[derive(Serialize, Deserialize, Debug)]
-pub struct JSONBasicTicker {
+pub struct BasicTicker {
     ticker: String,
     security_type: i32,
 }
 
-impl From<Ticker> for JSONTicker {
-    fn from(t: Ticker) -> Self {
+impl From<db_proto::Ticker> for Ticker {
+    fn from(t: db_proto::Ticker) -> Self {
         Self {
             ticker: t.ticker,
             name: Some(t.name),
@@ -71,15 +92,15 @@ impl From<Ticker> for JSONTicker {
         }
     }
 }
-impl From<JSONBasicTicker> for BasicTicker {
-    fn from(t: JSONBasicTicker) -> Self {
+impl From<BasicTicker> for db_proto::BasicTicker {
+    fn from(t: BasicTicker) -> Self {
         Self {
             ticker: t.ticker,
             security_type: t.security_type,
         }
     }
 }
-impl Clone for JSONBasicTicker {
+impl Clone for BasicTicker {
     fn clone(&self) -> Self {
         Self {
             ticker: self.ticker.to_string(),
@@ -89,12 +110,12 @@ impl Clone for JSONBasicTicker {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-pub struct JSONTimeSeriesData {
+pub struct TimeSeriesData {
     date: String,
     values: HashMap<String, f64>,
 }
-impl From<TimeSeriesData> for JSONTimeSeriesData {
-    fn from(s: TimeSeriesData) -> Self {
+impl From<db_proto::TimeSeriesData> for TimeSeriesData {
+    fn from(s: db_proto::TimeSeriesData) -> Self {
         Self {
             date: s.date,
             values: s.values,
@@ -103,8 +124,8 @@ impl From<TimeSeriesData> for JSONTimeSeriesData {
 }
 
 #[derive(Serialize)]
-pub struct JSONMovement {
-    ticker: JSONTicker,
+pub struct Movement {
+    ticker: Ticker,
     performance: f64,
     average: f64,
     volume: f64,
@@ -113,10 +134,10 @@ pub struct JSONMovement {
     date: String,
     period: i32,
 }
-impl From<Movement> for JSONMovement {
-    fn from(m: Movement) -> Self {
+impl From<db_proto::Movement> for Movement {
+    fn from(m: db_proto::Movement) -> Self {
         Self {
-            ticker: JSONTicker {
+            ticker: Ticker {
                 ticker: m.ticker,
                 security_type: m.security_type,
                 name: Some(m.name),
@@ -134,26 +155,26 @@ impl From<Movement> for JSONMovement {
 }
 
 #[derive(Serialize)]
-pub struct JSONDetailedCorrel {
-    ticker0: JSONTicker,
-    ticker1: JSONTicker,
+pub struct DetailedCorrel {
+    ticker0: Ticker,
+    ticker1: Ticker,
     date: String,
     period: i32,
     correlation: f64,
 }
 
 #[derive(Serialize)]
-pub struct JSONMutualCorrelation {
-    ticker: JSONTicker,
-    correlations: Vec<JSONDetailedCorrel>,
+pub struct MutualCorrel {
+    ticker: Ticker,
+    correlations: Vec<DetailedCorrel>,
     volatility: f64,
     stddev: f64,
     performance: f64,
     volume: f64,
 }
-impl TryFrom<MutualCorrel> for JSONMutualCorrelation {
+impl TryFrom<db_proto::MutualCorrel> for MutualCorrel {
     type Error = StreamError;
-    fn try_from(c: MutualCorrel) -> Result<Self, Self::Error> {
+    fn try_from(c: db_proto::MutualCorrel) -> Result<Self, Self::Error> {
         Ok(Self {
             ticker: c
                 .ticker
@@ -163,7 +184,7 @@ impl TryFrom<MutualCorrel> for JSONMutualCorrelation {
                 .correlations
                 .into_iter()
                 .map(|c| c.try_into())
-                .collect::<Result<Vec<JSONDetailedCorrel>, Self::Error>>()?,
+                .collect::<Result<Vec<DetailedCorrel>, Self::Error>>()?,
             volatility: c.volatility,
             stddev: c.stddev,
             performance: c.performance,
@@ -171,9 +192,9 @@ impl TryFrom<MutualCorrel> for JSONMutualCorrelation {
         })
     }
 }
-impl TryFrom<DetailedCorrel> for JSONDetailedCorrel {
+impl TryFrom<db_proto::DetailedCorrel> for DetailedCorrel {
     type Error = StreamError;
-    fn try_from(c: DetailedCorrel) -> Result<Self, Self::Error> {
+    fn try_from(c: db_proto::DetailedCorrel) -> Result<Self, Self::Error> {
         Ok(Self {
             ticker0: c.ticker0.unwrap().into(),
             ticker1: c.ticker1.unwrap().into(),
@@ -183,7 +204,7 @@ impl TryFrom<DetailedCorrel> for JSONDetailedCorrel {
         })
     }
 }
-impl Clone for JSONTicker {
+impl Clone for Ticker {
     fn clone(&self) -> Self {
         Self {
             ticker: self.ticker.to_string(),
@@ -218,7 +239,7 @@ impl From<db_proto::PortfolioMetas> for Vec<Portfolio> {
 }
 
 pub type PortfolioSecurities = Vec<PortfolioSecurity>;
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct PortfolioSecurity {
     portfolio_id: String,
     security_type: i32,
@@ -252,13 +273,42 @@ impl From<PortfolioSecurity> for db_proto::PortfolioSecurity {
         }
     }
 }
-// impl From<Vec<PortfolioSecurity>> for Vec<db_proto::PortfolioSecurities> {
-//     fn from(securities: Vec<PortfolioSecurity>) -> Self {
-//         Self {
-//             securities: securities.into_iter().map(|p| p.into()).collect(),
-//         }
-//     }
-// }
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct Security {
+    security_type: i32,
+    ticker: String,
+    volume: f64,
+    purchase_date: Option<String>,
+    sell_date: Option<String>,
+}
+#[derive(Serialize, Deserialize, Debug)]
+pub struct SecurityProfitReq {
+    pub util: String,
+    pub parition: i32,
+    pub securities: Vec<Security>,
+}
+
+impl From<SecurityProfitReq> for db_proto::SecurityProfitReq {
+    fn from(req: SecurityProfitReq) -> Self {
+        Self {
+            until: req.util,
+            partition: req.parition,
+            securities: req
+                .securities
+                .into_iter()
+                .map(|s| db_proto::security_profit_req::Security {
+                    security_type: s.security_type,
+                    ticker: s.ticker,
+                    volume: s.volume,
+                    purchase_date: s.purchase_date.unwrap_or("".to_string()),
+                    sell_date: s.sell_date,
+                })
+                .collect(),
+        }
+    }
+}
+
 pub type SecurityProfits = Vec<SecurityProfit>;
 #[derive(Serialize, Debug)]
 pub struct SecurityProfit {
@@ -292,30 +342,30 @@ impl From<db_proto::SecurityProfits> for Vec<SecurityProfit> {
     }
 }
 
-pub type JSONMovements = Vec<JSONMovement>;
+pub type Movements = Vec<Movement>;
 
 #[derive(Serialize, Debug)]
-pub struct JSONCorrelatingTickers {
-    tickers: Vec<JSONTicker>,
+pub struct CorrelatingTickers {
+    tickers: Vec<Ticker>,
     correlation: f64,
     date: String,
     period: i32,
     volume0: f64,
     volume1: f64,
 }
-impl From<Correl> for JSONCorrelatingTickers {
-    fn from(c: Correl) -> Self {
+impl From<db_proto::Correl> for CorrelatingTickers {
+    fn from(c: db_proto::Correl) -> Self {
         let ticker0 = c.ticker0.unwrap();
         let ticker1 = c.ticker1.unwrap();
         Self {
             tickers: vec![
-                JSONTicker {
+                Ticker {
                     ticker: ticker0.ticker,
                     security_type: ticker0.security_type,
                     name: None,
                     custom_fields: None,
                 },
-                JSONTicker {
+                Ticker {
                     ticker: ticker1.ticker,
                     security_type: ticker1.security_type,
                     name: None,
@@ -336,17 +386,37 @@ pub struct Trading {
     db_loader_port: u16,
 }
 
-// async fn stream_to_vec<Src>(mut stream: Streaming<Src>) -> Result<Vec<Src>>
-// where
-//     Src: 'static + Send,
-//     // Tar: From<Src> + Send + 'static,
-// {
-//     let mut vec = Vec::new();
-//     while let Some(entry) = stream.next().await {
-//         vec.push(entry?);
-//     }
-//     Ok(vec)
-// }
+pub type ActixStreamItem = Result<Bytes, StreamError>;
+pub type ActixStream = ReceiverStream<ActixStreamItem>;
+
+async fn gprc_to_stream<Src, ToJSON>(mut stream: Streaming<Src>, to_json: ToJSON) -> ActixStream
+where
+    Src: Send + 'static,
+    ToJSON: Send + 'static + Fn(Src) -> Result<String>,
+{
+    let (tx, rx) = mpsc::channel::<ActixStreamItem>(100);
+
+    tokio::spawn(async move {
+        tx.send(Ok(Bytes::from("["))).await?;
+        let mut entries_count = 0;
+        while let Some(entry) = stream.next().await {
+            if entries_count > 0 {
+                tx.send(Ok(Bytes::from(","))).await?;
+            }
+            entries_count += 1;
+            let entry = entry
+                .map(|entry| to_json(entry))
+                .map(|js| Bytes::from(js.unwrap()))
+                .map_err(|err| StreamError::from(err.to_string()));
+            if let Err(err) = tx.send(entry).await {
+                println!("gRPC-error: sending entry failed: {:?}", err);
+            }
+        }
+        tx.send(Ok(Bytes::from("]"))).await
+    });
+    ReceiverStream::new(rx)
+}
+
 impl Trading {
     pub fn new(envs: Envs) -> Trading {
         Trading {
@@ -361,48 +431,22 @@ impl Trading {
         ))
         .await?)
     }
-    pub async fn get_trading_data<Src, Tar>(
-        &self,
-        mut stream: Streaming<Src>,
-    ) -> Result<Receiver<Tar>>
-    where
-        Src: 'static + Send,
-        Tar: From<Src> + Send + 'static,
-    {
-        let (tx, rx) = mpsc::channel::<Tar>(100);
 
-        tokio::spawn(async move {
-            while let Some(entry) = stream.next().await {
-                let entry = entry
-                    .map_err(|err| format!("gRPC-error: received invalid entry: {:?}", err))?;
-                let tar = entry.into();
-                tx.send(tar)
-                    .await
-                    .map_err(|_| "gRPC-error - sending entry failed".to_string())?;
-            }
-            Result::<(), String>::Ok(())
-        });
-        Ok(rx)
-    }
-    pub async fn get_tickers(
-        &self,
-        ttype: i32,
-        filter: Option<&str>,
-        limit: u32,
-    ) -> Result<Receiver<JSONTicker>> {
+    pub async fn get_tickers(&self, filter: TickerFilter) -> Result<ActixStream> {
         let stream = self
             .client()
             .await?
-            .get_tickers(tonic::Request::new(TickerFilter {
-                ticker_type: ttype,
-                filter: filter.unwrap_or("").to_string(),
-                limit,
-                traded_within_past_n_days: 10,
-            }))
+            .get_tickers(tonic::Request::new(filter.into()))
             .await?
             .into_inner();
 
-        self.get_trading_data(stream).await
+        let to_json = |t: db_proto::Ticker| -> Result<String> {
+            let t: Ticker = t.into();
+            let js = serde_json::to_string(&t).unwrap();
+            Ok(js)
+        };
+        Ok(gprc_to_stream(stream, to_json).await)
+        // self.get_trading_data(stream).await
     }
     pub async fn get_movements(
         &self,
@@ -412,11 +456,11 @@ impl Trading {
         period: u32,
         limit: u32,
         min_volume: u64,
-    ) -> Result<JSONMovements> {
+    ) -> Result<Movements> {
         Ok(self
             .client()
             .await?
-            .get_movements(tonic::Request::new(MovementsReq {
+            .get_movements(tonic::Request::new(db_proto::MovementsReq {
                 security_type: security_type as i32,
                 until,
                 period: period as i32,
@@ -436,7 +480,7 @@ impl Trading {
         until: String,
         period: u32,
         limit: u32,
-    ) -> Result<Receiver<JSONCorrelatingTickers>> {
+    ) -> Result<Receiver<CorrelatingTickers>> {
         println!(
             "in get_correlating_tickers: {}, {}, {}",
             until, period, limit
@@ -445,7 +489,7 @@ impl Trading {
         let mut stream = self
             .client()
             .await?
-            .get_correlating_tickers(tonic::Request::new(CorrelTickersReq {
+            .get_correlating_tickers(tonic::Request::new(db_proto::CorrelTickersReq {
                 until,
                 period: period as i32,
                 limit,
@@ -462,16 +506,16 @@ impl Trading {
     }
     pub async fn get_mutual_correlations(
         &self,
-        tickers: &Vec<JSONBasicTicker>,
+        tickers: &Vec<BasicTicker>,
         until: Option<&str>,
         period: u32,
-    ) -> Result<Vec<JSONMutualCorrelation>> {
+    ) -> Result<Vec<MutualCorrel>> {
         let mut client = self.client().await?;
         let mutual_correls = client
-            .get_mutual_correlations(tonic::Request::new(CorrelReq {
+            .get_mutual_correlations(tonic::Request::new(db_proto::CorrelReq {
                 tickers: tickers
                     .into_iter()
-                    .map(|t: &JSONBasicTicker| t.clone().into())
+                    .map(|t: &BasicTicker| t.clone().into())
                     .collect(),
                 until: until.unwrap_or("").to_string(),
                 period: period as i32,
@@ -487,16 +531,16 @@ impl Trading {
     }
     pub async fn get_security_data(
         &self,
-        ticker: BasicTicker,
+        ticker: db_proto::BasicTicker,
         from: &str,
         until: &str,
         intraday: bool,
-    ) -> Result<Receiver<JSONTimeSeriesData>> {
+    ) -> Result<Receiver<TimeSeriesData>> {
         let (tx, rx) = mpsc::channel(100);
         let mut stream = self
             .client()
             .await?
-            .get_security_data(tonic::Request::new(TimeSeriesReq {
+            .get_security_data(tonic::Request::new(db_proto::TimeSeriesReq {
                 ticker: Some(ticker),
                 from_date: from.to_string(),
                 until_date: until.to_string(),
@@ -513,7 +557,15 @@ impl Trading {
         });
         Ok(rx)
     }
-    pub async fn portfolios(&self, filter: &str) -> Result<Portfolios> {
+    pub async fn portfolio(&self, portfolio_id: String) -> Result<Portfolio> {
+        let mut client = self.client().await?;
+        Ok(client
+            .get_portfolio(tonic::Request::new(db_proto::Id { id: portfolio_id }))
+            .await?
+            .into_inner()
+            .into())
+    }
+    pub async fn portfolios(&self, filter: String) -> Result<Portfolios> {
         let mut client = self.client().await?;
         Ok(client
             .get_portfolios(tonic::Request::new(db_proto::PortfolioReq {
@@ -523,12 +575,10 @@ impl Trading {
             .into_inner()
             .into())
     }
-    pub async fn portfolio_securities(&self, portfolio_id: &str) -> Result<PortfolioSecurities> {
+    pub async fn portfolio_securities(&self, portfolio_id: String) -> Result<PortfolioSecurities> {
         let mut client = self.client().await?;
         Ok(client
-            .get_portfolio_securities(tonic::Request::new(db_proto::Id {
-                id: portfolio_id.to_string(),
-            }))
+            .get_portfolio_securities(tonic::Request::new(db_proto::Id { id: portfolio_id }))
             .await?
             .into_inner()
             .securities
@@ -536,13 +586,10 @@ impl Trading {
             .map(|s| s.into())
             .collect())
     }
-    pub async fn portfolio_profits(
-        &self,
-        req: db_proto::SecurityProfitReq,
-    ) -> Result<SecurityProfits> {
+    pub async fn portfolio_profits(&self, req: SecurityProfitReq) -> Result<SecurityProfits> {
         let mut client = self.client().await?;
         Ok(client
-            .get_portfolio_profits(tonic::Request::new(req))
+            .get_portfolio_profits(tonic::Request::new(req.into()))
             .await?
             .into_inner()
             .into())
