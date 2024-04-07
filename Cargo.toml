@@ -11,8 +11,8 @@ actix-http = { version = "3.5", features = ["http2"] }
 tokio = { version = "1.23", features = ["full"] }
 tokio-stream = "0.1"
 anyhow = "1.0"
-tonic = "0.8"
-prost = "0.11"
+tonic = "0.11"
+prost = "0.12"
 chrono = "0.4"
 futures = "0.3"
 futures-util = "0.3"
@@ -24,9 +24,10 @@ serde_json = "1.0"
 serde_repr = "0.1"
 erased-serde = "0.3.25"
 env_logger = "0.11.1"
+lazy_static = "1.4.0"
 
 [build-dependencies]
-tonic-build = "0.8"
+tonic-build = "0.11"
 
 [lib]
 name = "rustix"

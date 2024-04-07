@@ -12,6 +12,8 @@ use rustix::envs::Envs;
 use rustix::error::RustixErr;
 use rustix::trading::{self, Trading};
 
+extern crate lazy_static;
+
 #[derive(Deserialize)]
 struct Filter {
     filter: String,
@@ -31,16 +33,6 @@ fn success() -> Success {
         success: true,
         error: None,
     }
-}
-
-#[get("/")]
-async fn hello() -> impl Responder {
-    HttpResponse::Ok().body("Hello world!")
-}
-
-#[post("/echo")]
-async fn echo(req_body: String) -> impl Responder {
-    HttpResponse::Ok().body(req_body)
 }
 
 #[post("/tickers")]
@@ -170,30 +162,48 @@ async fn correlating_tickers(
         .content_type("application/json")
         .streaming(body))
 }
+#[post("/mutualCorrelations")]
+async fn mutual_correlations(
+    data: Data<Trading>,
+    req: web::Json<trading::CorrelReq>,
+) -> Result<impl Responder> {
+    let resp = data
+        .mutual_correlations(req.0)
+        .await
+        .map_err(|err| RustixErr::new(err, 500))?;
+    Ok(web::Json(resp))
+}
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
-    env_logger::init_from_env(Env::default().default_filter_or("info"));
+    let envs = Envs::parse();
+    println!(
+        "listening on {}:{} in mode '{}'",
+        envs.host, envs.port, envs.mode,
+    );
+    env_logger::init_from_env(Env::default().default_filter_or(envs.mode));
     HttpServer::new(|| {
         App::new()
             .app_data(Data::new(Trading::new(Envs::parse())))
             .wrap(Logger::default())
             .wrap(Logger::new("%a %{User-Agent}i"))
-            .service(hello)
-            .service(echo)
-            .service(tickers)
-            .service(portfolio)
-            .service(portfolios)
-            .service(create_portfolio)
-            .service(buy_portfolio)
-            .service(sell_portfolio)
-            .service(portfolio_profits)
-            .service(portfolio_securities)
-            .service(security_data)
-            .service(movements)
-            .service(correlating_tickers)
+            .service(
+                web::scope("/api")
+                    .service(tickers)
+                    .service(portfolio)
+                    .service(portfolios)
+                    .service(create_portfolio)
+                    .service(buy_portfolio)
+                    .service(sell_portfolio)
+                    .service(portfolio_profits)
+                    .service(portfolio_securities)
+                    .service(security_data)
+                    .service(movements)
+                    .service(correlating_tickers)
+                    .service(mutual_correlations),
+            )
     })
-    .bind(("127.0.0.1", 8080))?
+    .bind((envs.host, envs.port))?
     .run()
     .await
 }
@@ -202,13 +212,18 @@ async fn main() -> std::io::Result<()> {
 mod tests {
     use anyhow::Result;
     use reqwest;
+    use rustix::envs::Envs;
     use rustix::trading::{self};
     use serde;
     use std::time::Instant;
     use tokio;
 
+    lazy_static! {
+        static ref ENV: Envs = Envs::parse();
+    }
+
     fn url(endpoint: &str) -> String {
-        format!("http://localhost:8080{}", endpoint)
+        format!("http://{}:{}/api{}", ENV.host, ENV.port, endpoint)
     }
     async fn get_json<T>(endpoint: &str, query: Option<&[(&str, &str)]>) -> Result<T>
     where
@@ -230,6 +245,7 @@ mod tests {
     {
         let url: String = url(endpoint);
         let body_json = serde_json::to_string(&body)?;
+        println!("body_json for endpoint {}: {}", url, body_json);
         let res = reqwest::Client::new()
             .post(url)
             .body(body_json)

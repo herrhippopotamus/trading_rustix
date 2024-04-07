@@ -1,0 +1,18 @@
+http:
+  routers:
+    to-ws:
+      # By default, routers listen to every entry points
+      rule: "PathPrefix(`/api`)"
+      service: "ws"
+    to-fe:
+      rule: "PathPrefix(`/`)"
+      service: "fe"
+  services:
+    ws:
+      loadBalancer:
+        servers:
+        - url: "http://127.0.0.1:8000/"
+    fe:
+      loadBalancer:
+        servers:
+        - url: "http://127.0.0.1:8008/"

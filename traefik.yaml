@@ -1,0 +1,7 @@
+entryPoints:
+  web:
+    address: ":3000"
+
+providers:
+  file:
+    filename: ./traefik_dynamic.yaml

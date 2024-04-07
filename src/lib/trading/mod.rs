@@ -1,10 +1,9 @@
 use crate::envs::Envs;
+use crate::proto::dataloader::data_loader_client::DataLoaderClient;
+use crate::proto::dataloader::{self as db_proto};
 use anyhow::Result;
 use bytes::Bytes;
-use dataloader::data_loader_client::DataLoaderClient;
-use dataloader::{self as db_proto};
 use serde::{Deserialize, Serialize};
-use std::clone::Clone;
 use std::collections::HashMap;
 use std::error::Error;
 use std::fmt;
@@ -41,11 +40,8 @@ impl From<StreamError> for String {
         e.src
     }
 }
-pub mod dataloader {
-    tonic::include_proto!("dataloader");
-}
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize)]
 pub struct TickerFilter {
     #[serde(rename = "security_type")]
     pub ttype: i32,
@@ -68,7 +64,7 @@ impl From<TickerFilter> for db_proto::TickerFilter {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize)]
 pub struct MovementsReq {
     pub security_type: u32,
     pub sort_by: u32,
@@ -90,7 +86,7 @@ impl From<MovementsReq> for db_proto::MovementsReq {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize)]
 pub struct CorrelatingTickersReq {
     pub until: String,
     pub period: u32,
@@ -106,7 +102,7 @@ impl From<CorrelatingTickersReq> for db_proto::CorrelTickersReq {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize)]
 pub struct Ticker {
     ticker: String,
     name: Option<String>,
@@ -147,7 +143,7 @@ impl Clone for BasicTicker {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize)]
 pub struct TimeSeriesData {
     date: String,
     values: HashMap<String, f64>,
@@ -160,7 +156,7 @@ impl From<db_proto::TimeSeriesData> for TimeSeriesData {
         }
     }
 }
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize)]
 pub struct TimeSeriesReq {
     pub ticker: BasicTicker,
     pub from: String,
@@ -270,7 +266,7 @@ impl Clone for Ticker {
 }
 
 pub type Portfolios = Vec<Portfolio>;
-#[derive(Deserialize, Serialize, Debug)]
+#[derive(Deserialize, Serialize)]
 pub struct Portfolio {
     pub id: String,
     pub name: String,
@@ -293,7 +289,7 @@ impl From<db_proto::PortfolioMetas> for Vec<Portfolio> {
 }
 
 pub type PortfolioSecurities = Vec<PortfolioSecurity>;
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize)]
 pub struct PortfolioSecurity {
     portfolio_id: String,
     security_type: i32,
@@ -328,7 +324,7 @@ impl From<PortfolioSecurity> for db_proto::PortfolioSecurity {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize)]
 pub struct Security {
     security_type: i32,
     ticker: String,
@@ -336,7 +332,7 @@ pub struct Security {
     purchase_date: Option<String>,
     sell_date: Option<String>,
 }
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize)]
 pub struct SecurityProfitReq {
     pub util: String,
     pub parition: i32,
@@ -364,7 +360,7 @@ impl From<SecurityProfitReq> for db_proto::SecurityProfitReq {
 }
 
 pub type SecurityProfits = Vec<SecurityProfit>;
-#[derive(Serialize, Debug)]
+#[derive(Serialize)]
 pub struct SecurityProfit {
     ticker: String,
     security_type: i32,
@@ -398,7 +394,7 @@ impl From<db_proto::SecurityProfits> for Vec<SecurityProfit> {
 
 pub type Movements = Vec<Movement>;
 
-#[derive(Serialize, Debug)]
+#[derive(Serialize)]
 pub struct CorrelatingTickers {
     tickers: Vec<Ticker>,
     correlation: f64,
@@ -435,6 +431,25 @@ impl From<db_proto::Correl> for CorrelatingTickers {
     }
 }
 
+#[derive(Deserialize)]
+pub struct CorrelReq {
+    pub tickers: Vec<BasicTicker>,
+    pub until: Option<String>,
+    pub period: i32,
+}
+impl From<CorrelReq> for db_proto::CorrelReq {
+    fn from(c: CorrelReq) -> Self {
+        Self {
+            tickers: c
+                .tickers
+                .into_iter()
+                .map(|t: BasicTicker| t.into())
+                .collect(),
+            until: c.until.unwrap_or("".to_string()),
+            period: c.period,
+        }
+    }
+}
 pub struct Trading {
     db_loader_host: String,
     db_loader_port: u16,
@@ -529,22 +544,10 @@ impl Trading {
 
         Ok(gprc_to_stream(stream, to_json).await)
     }
-    pub async fn mutual_correlations(
-        &self,
-        tickers: &Vec<BasicTicker>,
-        until: Option<&str>,
-        period: u32,
-    ) -> Result<Vec<MutualCorrel>> {
+    pub async fn mutual_correlations(&self, req: CorrelReq) -> Result<Vec<MutualCorrel>> {
         let mut client = self.client().await?;
         let mutual_correls = client
-            .get_mutual_correlations(tonic::Request::new(db_proto::CorrelReq {
-                tickers: tickers
-                    .into_iter()
-                    .map(|t: &BasicTicker| t.clone().into())
-                    .collect(),
-                until: until.unwrap_or("").to_string(),
-                period: period as i32,
-            }))
+            .get_mutual_correlations(tonic::Request::new(req.into()))
             .await?
             .into_inner();
         let mutual_correls = mutual_correls
