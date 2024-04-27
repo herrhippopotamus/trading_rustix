@@ -4,13 +4,18 @@ package dataloader;
 service DataLoader {
     rpc GetTickerDetails(BasicTicker) returns (Ticker);
     rpc GetTickers(TickerFilter) returns (stream Ticker);
+
     rpc GetSecurityData(TimeSeriesReq) returns (stream TimeSeriesData);
+    rpc GetLatestSecurityDataDate(DateReq) returns (Date);
+
     rpc GetMovement(MovementReq) returns (Movement);
     rpc GetMovements(MovementsReq) returns (Movements);
+    rpc GetAvgMovement(MovementReq) returns (Movement);
+    rpc GetAvgMovements(MovementsReq) returns (Movements);
+
     rpc GetCorrelations(CorrelReq) returns (stream Correl);
     rpc GetCorrelatingTickers(CorrelTickersReq) returns (stream Correl);
     rpc GetMutualCorrelations(CorrelReq) returns (MutualCorrels);
-    rpc GetLatestSecurityDataDate(DateReq) returns (Date);
 
     // portfolio procedures:
     rpc GetPortfolios(PortfolioReq) returns (PortfolioMetas);
@@ -23,6 +28,24 @@ service DataLoader {
     rpc BuySecurity(PortfolioSecurity) returns (SuccessResp);
     rpc SellSecurity(PortfolioSecurity) returns (SuccessResp);
     rpc DeletePortfolioSecurity(PortfolioSecurity) returns (SuccessResp);
+
+    rpc GetStockSplits(StockSplitReq) returns (StockSplits);
+}
+
+
+message StockSplitReq {
+    string from = 1;
+    string until = 2;
+    uint64 limit = 3;
+}
+message StockSplit {
+    string ticker = 1;
+    string date = 2;
+    double numerator = 3;
+    double denominator = 4;
+}
+message StockSplits {
+    repeated StockSplit splits = 1;
 }
 
 message DateReq {
@@ -102,6 +125,7 @@ message CorrelTickersReq {
     string until = 1;
     Period period = 2;
     uint32 limit = 3;
+    uint64 min_volume = 4;
 }
 message Correl {
     BasicTicker ticker0 = 1;
@@ -158,6 +182,7 @@ enum MovementType {
     LOSER = 1;
     VOLUME = 2;
     VOLATILITY = 3;
+    ABS_PERFORMANCE = 4;
 }
 
 enum Period {
@@ -185,7 +210,6 @@ message MovementReq {
 }
 message Movement {
     string ticker = 1;
-    string name = 2;
     TickerType security_type = 3;
     string date = 4;
     Period period = 5;

@@ -40,6 +40,7 @@ async fn tickers(
     data: Data<Trading>,
     req: web::Json<trading::TickerFilter>,
 ) -> Result<HttpResponse> {
+    println!("in tickers endpoint");
     let body = data
         .tickers(req.0)
         .await

@@ -1,10 +1,12 @@
 use crate::envs::Envs;
 use crate::proto::dataloader::data_loader_client::DataLoaderClient;
-use crate::proto::dataloader::{self as db_proto};
+use crate::proto::dataloader::{self as db_proto, Period, StockSplitReq};
+use crate::time::parse_date;
 use anyhow::Result;
 use bytes::Bytes;
+use chrono::{Duration, NaiveDate};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::fmt;
 use tokio::sync::mpsc;
@@ -72,6 +74,7 @@ pub struct MovementsReq {
     pub period: u32,
     pub limit: u32,
     pub min_volume: u64,
+    pub without_stock_splits: Option<bool>,
 }
 impl From<MovementsReq> for db_proto::MovementsReq {
     fn from(m: MovementsReq) -> Self {
@@ -86,11 +89,44 @@ impl From<MovementsReq> for db_proto::MovementsReq {
     }
 }
 
+impl From<u32> for Period {
+    fn from(x: u32) -> Self {
+        match x {
+            x if x == Period::Year as u32 => Period::Year,
+            x if x == Period::Month as u32 => Period::Month,
+            x if x == Period::Week as u32 => Period::Week,
+            x if x == Period::Day as u32 => Period::Day,
+            x if x == Period::Hour as u32 => Period::Hour,
+            x if x == Period::Minute as u32 => Period::Minute,
+            _ => Period::Month,
+        }
+    }
+}
+
+impl From<Period> for Duration {
+    fn from(p: Period) -> Self {
+        match p {
+            Period::Year => Duration::days(365),
+            Period::Month => Duration::days(30),
+            Period::Week => Duration::days(7),
+            Period::Day => Duration::days(1),
+            Period::Hour => Duration::hours(1),
+            Period::Minute => Duration::minutes(1),
+        }
+    }
+}
+fn eval_from_date(until: &str, period: Period) -> Result<NaiveDate> {
+    let until = parse_date(until)?;
+    let period: Duration = period.into();
+    Ok(until - period)
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct CorrelatingTickersReq {
     pub until: String,
     pub period: u32,
     pub limit: u32,
+    pub min_volume: Option<u64>,
 }
 impl From<CorrelatingTickersReq> for db_proto::CorrelTickersReq {
     fn from(c: CorrelatingTickersReq) -> Self {
@@ -98,6 +134,7 @@ impl From<CorrelatingTickersReq> for db_proto::CorrelTickersReq {
             until: c.until,
             period: c.period as i32,
             limit: c.limit,
+            min_volume: c.min_volume.unwrap_or_default(),
         }
     }
 }
@@ -190,7 +227,7 @@ impl From<db_proto::Movement> for Movement {
             ticker: Ticker {
                 ticker: m.ticker,
                 security_type: m.security_type,
-                name: Some(m.name),
+                name: None,
                 custom_fields: None,
             },
             performance: m.performance,
@@ -502,6 +539,10 @@ impl Trading {
     }
 
     pub async fn tickers(&self, filter: TickerFilter) -> Result<ActixStream> {
+        println!(
+            "requesting tickers - sec_type: {}, filter: {:?}",
+            filter.ttype, filter.filter
+        );
         let stream = self
             .client()
             .await?
@@ -517,16 +558,41 @@ impl Trading {
         Ok(gprc_to_stream(stream, to_json).await)
     }
     pub async fn movements(&self, req: MovementsReq) -> Result<Movements> {
-        Ok(self
-            .client()
-            .await?
+        let rmv_splits = req.security_type == 0 && req.without_stock_splits.unwrap_or(false);
+        let mut client = self.client().await?;
+        let until = req.until.to_string();
+        let period: db_proto::Period = req.period.into();
+        let from = eval_from_date(&until, period)?;
+
+        let mut movements = client
             .get_movements(tonic::Request::new(req.into()))
             .await?
             .into_inner()
             .movements
             .into_iter()
             .map(|m| m.into())
-            .collect())
+            .collect::<Vec<Movement>>();
+        if rmv_splits {
+            let splits = client
+                .get_stock_splits(StockSplitReq {
+                    from: from.to_string(),
+                    until,
+                    limit: 0,
+                })
+                .await?
+                .into_inner()
+                .splits
+                .into_iter()
+                .map(|split| split.ticker)
+                .collect::<HashSet<_>>();
+
+            movements = movements
+                .into_iter()
+                .filter(|mov| !splits.contains(&mov.ticker.ticker))
+                .collect();
+        }
+
+        Ok(movements)
     }
     pub async fn correlating_tickers(&self, req: CorrelatingTickersReq) -> Result<ActixStream> {
         let stream = self
