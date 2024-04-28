@@ -126,6 +126,12 @@ message CorrelTickersReq {
     Period period = 2;
     uint32 limit = 3;
     uint64 min_volume = 4;
+    Sign sign = 5;
+    enum Sign {
+        ABS = 0;
+        POSITIVE = 1;
+        NEGATIVE = 2;
+    }
 }
 message Correl {
     BasicTicker ticker0 = 1;

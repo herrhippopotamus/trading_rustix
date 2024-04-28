@@ -178,6 +178,50 @@ pub struct CorrelTickersReq {
     pub limit: u32,
     #[prost(uint64, tag = "4")]
     pub min_volume: u64,
+    #[prost(enumeration = "correl_tickers_req::Sign", tag = "5")]
+    pub sign: i32,
+}
+/// Nested message and enum types in `CorrelTickersReq`.
+pub mod correl_tickers_req {
+    #[derive(
+        Clone,
+        Copy,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash,
+        PartialOrd,
+        Ord,
+        ::prost::Enumeration
+    )]
+    #[repr(i32)]
+    pub enum Sign {
+        Abs = 0,
+        Positive = 1,
+        Negative = 2,
+    }
+    impl Sign {
+        /// String value of the enum field names used in the ProtoBuf definition.
+        ///
+        /// The values are not transformed in any way and thus are considered stable
+        /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+        pub fn as_str_name(&self) -> &'static str {
+            match self {
+                Sign::Abs => "ABS",
+                Sign::Positive => "POSITIVE",
+                Sign::Negative => "NEGATIVE",
+            }
+        }
+        /// Creates an enum from field names used in the ProtoBuf definition.
+        pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+            match value {
+                "ABS" => Some(Self::Abs),
+                "POSITIVE" => Some(Self::Positive),
+                "NEGATIVE" => Some(Self::Negative),
+                _ => None,
+            }
+        }
+    }
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]

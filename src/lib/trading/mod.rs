@@ -127,6 +127,7 @@ pub struct CorrelatingTickersReq {
     pub period: u32,
     pub limit: u32,
     pub min_volume: Option<u64>,
+    pub sign: Option<u32>,
 }
 impl From<CorrelatingTickersReq> for db_proto::CorrelTickersReq {
     fn from(c: CorrelatingTickersReq) -> Self {
@@ -135,6 +136,7 @@ impl From<CorrelatingTickersReq> for db_proto::CorrelTickersReq {
             period: c.period as i32,
             limit: c.limit,
             min_volume: c.min_volume.unwrap_or_default(),
+            sign: c.sign.unwrap_or(0) as i32,
         }
     }
 }
