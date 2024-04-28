@@ -193,11 +193,13 @@ enum MovementType {
 
 enum Period {
     YEAR = 0;
-    MONTH = 1;
-    WEEK = 2;
-    DAY = 3;
-    HOUR = 4;
-    MINUTE = 5;
+    SEMI_ANNUAL = 1;
+    QUARTER = 2;
+    MONTH = 3;
+    WEEK = 4;
+    DAY = 5;
+    HOUR = 6;
+    MINUTE = 7;
 }
 message MovementsReq {
     TickerType security_type = 1;
@@ -276,4 +278,5 @@ message TimeSeriesData {
     string date = 1;
     map<string, double> values = 2;
 }
+
 

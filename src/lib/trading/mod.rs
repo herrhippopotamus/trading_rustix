@@ -578,6 +578,7 @@ impl Trading {
             .into_iter()
             .map(|m| m.into())
             .collect::<Vec<Movement>>();
+        println!("received movements: {}", movements.len());
         if rmv_splits {
             let splits = client
                 .get_stock_splits(StockSplitReq {
@@ -597,6 +598,7 @@ impl Trading {
                 .filter(|mov| !splits.contains(&mov.ticker.ticker))
                 .collect();
         }
+        println!("after split filter - movements: {}", movements.len());
 
         Ok(movements)
     }

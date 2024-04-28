@@ -487,11 +487,13 @@ impl MovementType {
 #[repr(i32)]
 pub enum Period {
     Year = 0,
-    Month = 1,
-    Week = 2,
-    Day = 3,
-    Hour = 4,
-    Minute = 5,
+    SemiAnnual = 1,
+    Quarter = 2,
+    Month = 3,
+    Week = 4,
+    Day = 5,
+    Hour = 6,
+    Minute = 7,
 }
 impl Period {
     /// String value of the enum field names used in the ProtoBuf definition.
@@ -501,6 +503,8 @@ impl Period {
     pub fn as_str_name(&self) -> &'static str {
         match self {
             Period::Year => "YEAR",
+            Period::SemiAnnual => "SEMI_ANNUAL",
+            Period::Quarter => "QUARTER",
             Period::Month => "MONTH",
             Period::Week => "WEEK",
             Period::Day => "DAY",
@@ -512,6 +516,8 @@ impl Period {
     pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
         match value {
             "YEAR" => Some(Self::Year),
+            "SEMI_ANNUAL" => Some(Self::SemiAnnual),
+            "QUARTER" => Some(Self::Quarter),
             "MONTH" => Some(Self::Month),
             "WEEK" => Some(Self::Week),
             "DAY" => Some(Self::Day),
