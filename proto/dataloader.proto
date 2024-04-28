@@ -206,6 +206,8 @@ message MovementsReq {
     MovementType sort_by = 4;
     uint32 limit = 5;
     uint64 min_volume = 6;
+    double min_variance = 7;
+    double max_variance = 8;
 }
 
 message MovementReq {
@@ -274,3 +276,4 @@ message TimeSeriesData {
     string date = 1;
     map<string, double> values = 2;
 }
+

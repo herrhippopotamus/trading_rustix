@@ -340,6 +340,10 @@ pub struct MovementsReq {
     pub limit: u32,
     #[prost(uint64, tag = "6")]
     pub min_volume: u64,
+    #[prost(double, tag = "7")]
+    pub min_variance: f64,
+    #[prost(double, tag = "8")]
+    pub max_variance: f64,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]

@@ -74,6 +74,8 @@ pub struct MovementsReq {
     pub period: u32,
     pub limit: u32,
     pub min_volume: u64,
+    pub min_variance: f64,
+    pub max_variance: f64,
     pub without_stock_splits: Option<bool>,
 }
 impl From<MovementsReq> for db_proto::MovementsReq {
@@ -85,6 +87,8 @@ impl From<MovementsReq> for db_proto::MovementsReq {
             period: m.period as i32,
             limit: m.limit,
             min_volume: m.min_volume,
+            min_variance: m.min_variance,
+            max_variance: m.max_variance,
         }
     }
 }
