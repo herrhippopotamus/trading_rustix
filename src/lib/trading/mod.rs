@@ -97,6 +97,8 @@ impl From<u32> for Period {
     fn from(x: u32) -> Self {
         match x {
             x if x == Period::Year as u32 => Period::Year,
+            x if x == Period::SemiAnnual as u32 => Period::SemiAnnual,
+            x if x == Period::Quarter as u32 => Period::Quarter,
             x if x == Period::Month as u32 => Period::Month,
             x if x == Period::Week as u32 => Period::Week,
             x if x == Period::Day as u32 => Period::Day,
@@ -111,6 +113,8 @@ impl From<Period> for Duration {
     fn from(p: Period) -> Self {
         match p {
             Period::Year => Duration::days(365),
+            Period::SemiAnnual => Duration::days(180),
+            Period::Quarter => Duration::days(90),
             Period::Month => Duration::days(30),
             Period::Week => Duration::days(7),
             Period::Day => Duration::days(1),
